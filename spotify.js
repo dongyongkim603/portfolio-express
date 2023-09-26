@@ -31,18 +31,19 @@ async function getBearerToken(req, res) {
 }
 
 async function recetlyPlayedTracks(req, res) {
+
   const config = {
     headers: {
-      Authorization: 'Bearer ' + req.accessToken,
-      'Content-Type': 'application/json'
+      'Authorization': 'Bearer ' + req.accessToken,
     }
-  };
-
-  return axios.get('https://api.spotify.com/v1/me/player/recently-played', config)
+  }
+console.log(config)
+  await axios.get('https://api.spotify.com/v1/me/top/artists', config)
     .then((response) => {
       res.json({ recent_tracks: response.data });
     })
     .catch((error) => {
+      console.log(error.message)
       res.status(500).json({ error: 'Internal Server Error' });
     });
 }
