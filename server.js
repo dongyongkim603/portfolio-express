@@ -76,7 +76,7 @@ app.post('/recent-tracks', async (req, res) => {
 })
 
 app.get('/login', (req, res) => {
-  var state = generateRandomString(16);
+  let state = generateRandomString(16);
   try {
     res.redirect('https://accounts.spotify.com/authorize?' +
       querystring.stringify({
@@ -86,7 +86,7 @@ app.get('/login', (req, res) => {
         state: state
       }))
   } catch (err) {
-    console.log(err)
+    console.error(err)
   }
 });
 
@@ -100,7 +100,30 @@ function generateRandomString(length) {
   return text;
 }
 
-app.get('/callback', (req, res) => {
+app.get('/refresh_token', function(req, res) {
+
+  var refresh_token = req.query.refresh_token;
+  var authOptions = {
+    url: 'https://accounts.spotify.com/api/token',
+    headers: { 'Authorization': 'Basic ' + (new Buffer.from(client_id + ':' + client_secret).toString('base64')) },
+    form: {
+      grant_type: 'refresh_token',
+      refresh_token: refresh_token
+    },
+    json: true
+  };
+
+  request.post(authOptions, function(error, response, body) {
+    if (!error && response.statusCode === 200) {
+      var access_token = body.access_token;
+      res.send({
+        'access_token': access_token
+      });
+    }
+  });
+});
+
+app.get('/callback', async (req, res) => {
 
   let code = req.query.code || null;
   let state = req.query.state || null;
@@ -111,19 +134,30 @@ app.get('/callback', (req, res) => {
         error: 'state_mismatch'
       }));
   } else {
-    let authOptions = {
-      url: 'https://accounts.spotify.com/api/token',
-      form: {
-        code: code,
-        redirect_uri: 'http://localhost:3000/callback',
-        grant_type: 'authorization_code'
-      },
-      headers: {
-        'Authorization': 'Basic ' + (new Buffer.from(process.env.SPOTIFY_CLIENT_ID + ':' +
-          process.env.SPOTIFY_CLIENT_SECRET).toString('base64'))
-      },
-      json: true
-    };
+    try {
+      const data = new URLSearchParams();
+      data.append('grant_type', 'client_credentials');
+      data.append('redirect_uri', 'http://localhost:3000/refresh_token');
+      data.append('code', code);
+      const config = {
+        headers: {
+          'Authorization': 'Basic ' + (new Buffer.from(process.env.SPOTIFY_CLIENT_ID + ':' +
+            process.env.SPOTIFY_CLIENT_SECRET).toString('base64'))
+        },
+        json: true
+      };
+  
+      const response = await axios.post(tokenEndpoint, data, config);
+      if (response.status === 200) {
+        const accessToken = response.data.access_token;
+        res.json({ access_token: accessToken });
+      } else {
+        throw new Error('Failed to obtain access token');
+      }
+    } catch (error) {
+      console.error('Error fetching access token:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
   }
 });
 
