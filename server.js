@@ -1,7 +1,5 @@
 const express = require('express');
-const http = require('http');
 const querystring = require('querystring');
-const btoa = require('btoa');
 const axios = require('axios');
 const cors = require ('cors')
 require('dotenv').config()
@@ -87,7 +85,7 @@ app.get('/login', (req, res) => {
       querystring.stringify({
         response_type: 'code',
         client_id: process.env.SPOTIFY_CLIENT_ID,
-        redirect_uri: 'http://localhost:3000/callback',
+        redirect_uri: 'http://localhost:8080/spotify/callback',
         state: state
       }))
   } catch (err) {
@@ -105,27 +103,33 @@ function generateRandomString(length) {
   return text;
 }
 
-app.get('/refresh_token', function(req, res) {
-
-  var refresh_token = req.query.refresh_token;
-  var authOptions = {
-    url: 'https://accounts.spotify.com/api/token',
-    headers: { 'Authorization': 'Basic ' + (new Buffer.from(client_id + ':' + client_secret).toString('base64')) },
-    form: {
-      grant_type: 'refresh_token',
-      refresh_token: refresh_token
-    },
-    json: true
-  };
-
-  request.post(authOptions, function(error, response, body) {
-    if (!error && response.statusCode === 200) {
-      var access_token = body.access_token;
-      res.send({
-        'access_token': access_token
-      });
+app.post('/refresh_token', async (req, res) => {
+  try {
+    const refresh_token = req.body?.refresh_token
+    const data = new URLSearchParams();
+    data.append('grant_type', 'refresh_token');
+    data.append('refresh_token', refresh_token);
+  
+    const config = {
+      headers: {
+        'Authorization': 'Basic ' + (new Buffer.from(process.env.SPOTIFY_CLIENT_ID + ':' +
+          process.env.SPOTIFY_CLIENT_SECRET).toString('base64')),
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      json: true
+    };
+  
+    const response = await axios.post(tokenEndpoint, data, config)
+    
+    if (response.status === 200) {
+      res.send({ 'access_token': response.data });
+    } else {
+      throw new Error('Failed to obtain access token');
     }
-  });
+  } catch (err) {
+    console.error('Error fetching refresh token:', err.message);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 app.get('/callback', async (req, res) => {
@@ -142,10 +146,8 @@ app.get('/callback', async (req, res) => {
     try {
       const data = new URLSearchParams();
       data.append('grant_type', 'authorization_code');
-      data.append('redirect_uri', 'http://localhost:3000/callback');
+      data.append('redirect_uri', 'http://localhost:8080/spotify/callback');
       data.append('code', code);
-      const authString = `${req.body.clientSecret}:${req.body.clientId}`;
-      const base64AuthString = btoa(authString); 
 
       const config = {
         headers: {
@@ -155,11 +157,11 @@ app.get('/callback', async (req, res) => {
         },
         json: true
       };
-  console.log(tokenEndpoint, data, config)
+
       const response = await axios.post(tokenEndpoint, data, config);
+
       if (response.status === 200) {
-        const accessToken = response.data;
-        res.json({ access_token: accessToken });
+        res.json({ auth: response.data });
       } else {
         throw new Error('Failed to obtain access token');
       }
