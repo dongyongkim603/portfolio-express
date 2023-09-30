@@ -11,7 +11,12 @@ const { recetlyPlayedTracks } = require('./spotify');
 const app = express();
 
 const corsOptions = {
-  origin: 'http://localhost:3000',
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:8080',
+    'https://accounts.spotify.com/en/authorize?response_type=code&client_id=1afde426b48347c7baacc526df092900&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fcallback&state=MVJTFIOxc6Vj6eLP'
+  ],
+  preflightContinue: true,
 };
 
 const tokenEndpoint = 'https://accounts.spotify.com/api/token';
@@ -136,26 +141,30 @@ app.get('/callback', async (req, res) => {
   } else {
     try {
       const data = new URLSearchParams();
-      data.append('grant_type', 'client_credentials');
-      data.append('redirect_uri', 'http://localhost:3000/refresh_token');
+      data.append('grant_type', 'authorization_code');
+      data.append('redirect_uri', 'http://localhost:3000/callback');
       data.append('code', code);
+      const authString = `${req.body.clientSecret}:${req.body.clientId}`;
+      const base64AuthString = btoa(authString); 
+
       const config = {
         headers: {
           'Authorization': 'Basic ' + (new Buffer.from(process.env.SPOTIFY_CLIENT_ID + ':' +
-            process.env.SPOTIFY_CLIENT_SECRET).toString('base64'))
+            process.env.SPOTIFY_CLIENT_SECRET).toString('base64')),
+          'Content-Type': 'application/x-www-form-urlencoded'
         },
         json: true
       };
-  
+  console.log(tokenEndpoint, data, config)
       const response = await axios.post(tokenEndpoint, data, config);
       if (response.status === 200) {
-        const accessToken = response.data.access_token;
+        const accessToken = response.data;
         res.json({ access_token: accessToken });
       } else {
         throw new Error('Failed to obtain access token');
       }
     } catch (error) {
-      console.error('Error fetching access token:', error);
+      console.error('Error fetching access token:', error.message);
       res.status(500).json({ error: 'Internal Server Error' });
     }
   }
