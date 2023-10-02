@@ -19,48 +19,54 @@ const corsOptions = {
 
 const tokenEndpoint = 'https://accounts.spotify.com/api/token';
 
-app.use(express.json()); // For parsing JSON requests
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors(corsOptions));
 
 let accessToken = null;
+let refreshToken = null;
+let tokenExpirationTime = null;
 
-// app.use(async (req, res, next) => {
-//   console.log('accessToken ', accessToken)
-//   if (!accessToken) {
-//     try {
-//       const data = new URLSearchParams();
-//       data.append('grant_type', 'authorization_code');
-//       const authString = `${req.body.clientSecret}:${req.body.clientId}`;
-//       const base64AuthString = btoa(authString); 
+let logedIn = false;
 
-//       const config = {
-//         headers: {
-//           'Content-Type': 'application/x-www-form-urlencoded',
-//           Authorization: 'Basic ' + base64AuthString,
-//         },
-//       };
-
-//       const response = await axios.post(tokenEndpoint, data, config);
-
-//       if (response.status === 200) {
-//         accessToken = response.data.access_token;
-
-//         const expiresInMilliseconds = response.data.expires_in * 1000;
-//         setTimeout(() => {
-//           accessToken = null;
-//         }, expiresInMilliseconds);
-//       } else {
-//         throw new Error('Failed to obtain access token');
-//       }
-//     } catch (error) {
-//       return res.status(500).json({ error: 'Internal Server Error' });
-//     }
-//   }
-
-//   req.accessToken = accessToken;
-//   next();
-// });
+app.use(async (req, res, next) => {
+  if(!logedIn) {
+    next();
+  } else {
+    if (!accessToken || !tokenExpirationTime || Date.now() > tokenExpirationTime) {
+      try {
+        const data = new URLSearchParams();
+        data.append('grant_type', 'refresh_token');
+        data.append('refresh_token', refreshToken);
+  
+        const authString = `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`;
+        const base64AuthString = Buffer.from(authString).toString('base64');
+  
+        const config = {
+          headers: {
+            'Authorization': `Basic ${base64AuthString}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        };
+  
+        const response = await axios.post(tokenEndpoint, data, config);
+  
+        if (response.status === 200) {
+          accessToken = response.data.access_token;
+          const expiresInMilliseconds = response.data.expires_in * 1000;
+          tokenExpirationTime = Date.now() + expiresInMilliseconds;
+        } else {
+          throw new Error('Failed to obtain access token');
+        }
+      } catch (error) {
+        console.error('Error fetching access token:', error.message);
+        return res.status(500).json({ error: 'Internal Server Error' });
+      }
+    }
+    req.accessToken = accessToken;
+    next();
+  }
+});
 
 const port = process.env.PORT || 3000;
 
@@ -68,14 +74,15 @@ app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
 
-
 app.post('/recent-tracks', async (req, res) => {
-  const token = req.accessToken;
-  if (!token) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  const token = refreshToken;
+  // if (!token) {
+  //   return res.status(401).json({ error: 'Unauthorized' });
+  // }
   console.log('recetlyPlayedTracks')
-  await recetlyPlayedTracks(req, res)
+  console.log('accessToken', accessToken)
+  console.log('refreshToken', refreshToken)
+  await recetlyPlayedTracks(req, res, token)
 })
 
 app.get('/login', (req, res) => {
@@ -86,56 +93,19 @@ app.get('/login', (req, res) => {
         response_type: 'code',
         client_id: process.env.SPOTIFY_CLIENT_ID,
         redirect_uri: 'http://localhost:8080/spotify/callback',
-        state: state
+        state: state,
+        scope: 'user-top-read'
       }))
   } catch (err) {
     console.error(err)
   }
 });
 
-function generateRandomString(length) {
-  let text = '';
-  let possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-
-  for (let i = 0; i < length; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
-}
-
-app.post('/refresh_token', async (req, res) => {
-  try {
-    const refresh_token = req.body?.refresh_token
-    const data = new URLSearchParams();
-    data.append('grant_type', 'refresh_token');
-    data.append('refresh_token', refresh_token);
-  
-    const config = {
-      headers: {
-        'Authorization': 'Basic ' + (new Buffer.from(process.env.SPOTIFY_CLIENT_ID + ':' +
-          process.env.SPOTIFY_CLIENT_SECRET).toString('base64')),
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      json: true
-    };
-  
-    const response = await axios.post(tokenEndpoint, data, config)
-    
-    if (response.status === 200) {
-      res.send({ 'access_token': response.data });
-    } else {
-      throw new Error('Failed to obtain access token');
-    }
-  } catch (err) {
-    console.error('Error fetching refresh token:', err.message);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
 app.get('/callback', async (req, res) => {
-
+  
   let code = req.query.code || null;
   let state = req.query.state || null;
+  loggedIn = code && state;
 
   if (state === null) {
     res.redirect('/#' +
@@ -159,7 +129,9 @@ app.get('/callback', async (req, res) => {
       };
 
       const response = await axios.post(tokenEndpoint, data, config);
+      refreshToken = response.data.refresh_token
 
+console.log('refreshToken ', refreshToken)
       if (response.status === 200) {
         res.json({ auth: response.data });
       } else {
@@ -172,28 +144,43 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// app.get('/callback', function(req, res) {
+app.post('/refresh_token', async (req, res) => {
+  try {
+    const data = new URLSearchParams();
+    data.append('grant_type', 'refresh_token');
+    data.append('refresh_token', refreshToken);
+  
+    const config = {
+      headers: {
+        'Authorization': 'Basic ' + (new Buffer.from(process.env.SPOTIFY_CLIENT_ID + ':' +
+          process.env.SPOTIFY_CLIENT_SECRET).toString('base64')),
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      json: true
+    };
+  
+    const response = await axios.post(tokenEndpoint, data, config)
 
-//   var code = req.query.code || null;
-//   var state = req.query.state || null;
+    refreshToken = response.data.access_token
+    accessToken = response.data.access_token
+    
+    if (response.status === 200) {
+      res.json({ 'access_token': response.data });
+    } else {
+      throw new Error('Failed to obtain access token');
+    }
+  } catch (err) {
+    console.error('Error fetching refresh token:', err.message);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
-//   if (state === null) {
-//     res.redirect('/#' +
-//       querystring.stringify({
-//         error: 'state_mismatch'
-//       }));
-//   } else {
-//     var authOptions = {
-//       url: 'https://accounts.spotify.com/api/token',
-//       form: {
-//         code: code,
-//         redirect_uri: redirect_uri,
-//         grant_type: 'authorization_code'
-//       },
-//       headers: {
-//         'Authorization': 'Basic ' + (new Buffer.from(client_id + ':' + client_secret).toString('base64'))
-//       },
-//       json: true
-//     };
-//   }
-// });
+function generateRandomString(length) {
+  let text = '';
+  let possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+
+  for (let i = 0; i < length; i++) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
+}
