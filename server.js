@@ -85,28 +85,12 @@ app.post('/recent-tracks', async (req, res) => {
   await recetlyPlayedTracks(req, res, token)
 })
 
-app.get('/login', (req, res) => {
-  let state = generateRandomString(16);
-  try {
-    res.redirect('https://accounts.spotify.com/authorize?' +
-      querystring.stringify({
-        response_type: 'code',
-        client_id: process.env.SPOTIFY_CLIENT_ID,
-        redirect_uri: 'http://localhost:8080/spotify/callback',
-        state: state,
-        scope: 'user-top-read'
-      }))
-  } catch (err) {
-    console.error(err)
-  }
-});
-
 app.get('/callback', async (req, res) => {
   
   let code = req.query.code || null;
   let state = req.query.state || null;
   loggedIn = code && state;
-
+console.log("loggedIn", loggedIn)
   if (state === null) {
     res.redirect('/#' +
       querystring.stringify({
@@ -174,13 +158,3 @@ app.post('/refresh_token', async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
-
-function generateRandomString(length) {
-  let text = '';
-  let possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-
-  for (let i = 0; i < length; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
-}
