@@ -76,12 +76,9 @@ app.listen(port, () => {
 
 app.post('/recent-tracks', async (req, res) => {
   const token = refreshToken;
-  // if (!token) {
-  //   return res.status(401).json({ error: 'Unauthorized' });
-  // }
-  console.log('recetlyPlayedTracks')
-  console.log('accessToken', accessToken)
-  console.log('refreshToken', refreshToken)
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   await recetlyPlayedTracks(req, res, token)
 })
 
